@@ -1,6 +1,5 @@
 # pyright: reportMissingImports=false
-from os import getlogin, uname
-from pathlib import Path
+from datetime import datetime
 from kitty.boss import get_boss
 from kitty.fast_data_types import Screen, add_timer, get_options
 from kitty.utils import color_as_int
@@ -14,80 +13,52 @@ from kitty.tab_bar import (
     draw_title,
 )
 
-opts = get_options()  # --------------------------------------------⮯
-# --------------------------------------------------------------\
-# black  |  red     green    blue     magenta  cyan     white   | color
-# color0 |  color1  color2   color4   color5   color6   color7  | normal
-# color8 |  color9  color10  color12  color13  color14  color15 | bright
-# --------------------------------------------------------------/
-FG = as_rgb(color_as_int(opts.background))
-BG = as_rgb(color_as_int(opts.color4))
-BAR_BG = as_rgb(color_as_int(opts.tab_bar_background))
-ACTIVE_BG = as_rgb(color_as_int(opts.active_tab_background))
-SEPARATOR_SYMBOL, SOFT_SEPARATOR_SYMBOL = ("", "")
-SEPARATOR_SYMBOL_RIGHT = ""
-TRUNCATION_SYMBOL = "/⟜⊸/"
-ICON, ICON_HOST, ICON_USER, ICON_DIR = ("  ", " 歷 ", " ", "  ")
-RIGHT_MARGIN = -6
+opts = get_options()
+icon_fg = as_rgb(0XE5C07B)
+icon_bg = as_rgb(color_as_int(opts.color8))
+bat_text_color = as_rgb(color_as_int(opts.color15))
+clock_color = as_rgb(color_as_int(opts.color15))
+date_color = as_rgb(color_as_int(opts.color8))
+SEPARATOR_SYMBOL, SOFT_SEPARATOR_SYMBOL = ("", "")
+RIGHT_MARGIN = 1
 REFRESH_TIME = 1
-right_status_length = -1
+ICON = "   "
+UNPLUGGED_ICONS = {
+    10: "",
+    20: "",
+    30: "",
+    40: "",
+    50: "",
+    60: "",
+    70: "",
+    80: "",
+    90: "",
+    100: "",
+}
+PLUGGED_ICONS = {
+    1: "",
+}
+UNPLUGGED_COLORS = {
+    15: as_rgb(color_as_int(opts.color1)),
+    16: as_rgb(color_as_int(opts.color15)),
+}
+PLUGGED_COLORS = {
+    15: as_rgb(color_as_int(opts.color1)),
+    16: as_rgb(color_as_int(opts.color6)),
+    99: as_rgb(color_as_int(opts.color6)),
+    100: as_rgb(color_as_int(opts.color2)),
+}
 
 
 def _draw_icon(screen: Screen, index: int) -> int:
     if index != 1:
         return 0
     fg, bg = screen.cursor.fg, screen.cursor.bg
-    screen.cursor.fg, screen.cursor.bg = FG, BG
+    screen.cursor.fg = icon_fg
+    screen.cursor.bg = icon_bg
     screen.draw(ICON)
-    screen.cursor.fg, screen.cursor.bg = BG, bg
-    screen.draw(SEPARATOR_SYMBOL)
     screen.cursor.fg, screen.cursor.bg = fg, bg
-    screen.cursor.x = len(ICON + SEPARATOR_SYMBOL)
-    return screen.cursor.x
-
-
-def get_cwd():
-    cwd = ""
-    tab_manager = get_boss().active_tab_manager
-    if tab_manager is not None:
-        window = tab_manager.active_window
-        if window is not None:
-            cwd = window.cwd_of_child
-
-    cwd_parts = list(Path(cwd).parts)
-    if len(cwd_parts) > 1:
-        if cwd_parts[1] == "home":
-            cwd_parts[0] = "  "
-            cwd_parts[1:3] = []
-        else:
-            cwd_parts[0] = "  "
-    else:
-        cwd_parts[0] = "  "
-
-    if len(cwd_parts) < 5:
-        cwd = cwd_parts[0] + "/".join(cwd_parts[1:])
-    else:
-        cwd = (
-            cwd_parts[0]
-            + "/".join(cwd_parts[1:2])
-            + TRUNCATION_SYMBOL
-            + "/".join(cwd_parts[-2:])
-        )
-
-    return cwd
-
-
-def _draw_cwd(screen: Screen, index: int) -> int:
-    if index != 1:
-        return 0
-    fg, bg = screen.cursor.fg, screen.cursor.bg
-    screen.cursor.fg, screen.cursor.bg = BG, ACTIVE_BG
-    cwd = get_cwd()
-    screen.draw(cwd)
-    screen.cursor.fg, screen.cursor.bg = ACTIVE_BG, BAR_BG
-    screen.draw(SEPARATOR_SYMBOL)
-    screen.cursor.fg, screen.cursor.bg = fg, bg
-    screen.cursor.x = len(cwd) + 7
+    screen.cursor.x = len(ICON)
     return screen.cursor.x
 
 
@@ -95,16 +66,16 @@ def _draw_left_status(
     draw_data: DrawData,
     screen: Screen,
     tab: TabBarData,
+    before: int,
+    max_title_length: int,
     index: int,
+    is_last: bool,
     extra_data: ExtraData,
 ) -> int:
     if screen.cursor.x >= screen.columns - right_status_length:
         return screen.cursor.x
-    tab_bg, tab_fg = screen.cursor.bg, screen.cursor.fg
-    if index == 1:
-        screen.cursor.fg, screen.cursor.bg = tab_bg, BAR_BG
-        screen.draw(SEPARATOR_SYMBOL_RIGHT)
-        screen.cursor.bg = tab_bg
+    tab_bg = screen.cursor.bg
+    tab_fg = screen.cursor.fg
     default_bg = as_rgb(int(draw_data.default_bg))
     if extra_data.next_tab:
         next_tab_bg = as_rgb(draw_data.tab_bg(extra_data.next_tab))
@@ -139,54 +110,93 @@ def _draw_left_status(
 
 def _draw_right_status(screen: Screen, is_last: bool, cells: list) -> int:
     if not is_last:
-        screen.cursor.bg = FG
         return 0
     draw_attributed_string(Formatter.reset, screen)
     screen.cursor.x = screen.columns - right_status_length
     screen.cursor.fg = 0
-    screen.cursor.bg = 0
-    for color_fg, color_bg, status in cells:
-        screen.cursor.fg = color_fg
-        screen.cursor.bg = color_bg
+    for color, status in cells:
+        screen.cursor.fg = color
         screen.draw(status)
+    screen.cursor.bg = 0
     return screen.cursor.x
 
 
 def _redraw_tab_bar(_):
-    tab_manager = get_boss().active_tab_manager
-    if tab_manager is not None:
-        tab_manager.mark_tab_bar_dirty()
+    tm = get_boss().active_tab_manager
+    if tm is not None:
+        tm.mark_tab_bar_dirty()
 
+
+def get_battery_cells() -> list:
+    try:
+        with open("/sys/class/power_supply/BAT0/status", "r") as f:
+            status = f.read()
+        with open("/sys/class/power_supply/BAT0/capacity", "r") as f:
+            percent = int(f.read())
+        if status == "Discharging\n":
+            # TODO: declare the lambda once and don't repeat the code
+            icon_color = UNPLUGGED_COLORS[
+                min(UNPLUGGED_COLORS.keys(), key=lambda x: abs(x - percent))
+            ]
+            icon = UNPLUGGED_ICONS[
+                min(UNPLUGGED_ICONS.keys(), key=lambda x: abs(x - percent))
+            ]
+        elif status == "Not charging\n":
+            icon_color = UNPLUGGED_COLORS[
+                min(UNPLUGGED_COLORS.keys(), key=lambda x: abs(x - percent))
+            ]
+            icon = PLUGGED_ICONS[
+                min(PLUGGED_ICONS.keys(), key=lambda x: abs(x - percent))
+            ]
+        else:
+            icon_color = PLUGGED_COLORS[
+                min(PLUGGED_COLORS.keys(), key=lambda x: abs(x - percent))
+            ]
+            icon = PLUGGED_ICONS[
+                min(PLUGGED_ICONS.keys(), key=lambda x: abs(x - percent))
+            ]
+        percent_cell = (bat_text_color, str(percent) + "% ")
+        icon_cell = (icon_color, icon)
+        return [percent_cell, icon_cell]
+    except FileNotFoundError:
+        return []
+
+
+timer_id = None
+right_status_length = -1
 
 def draw_tab(
     draw_data: DrawData,
     screen: Screen,
     tab: TabBarData,
-    before: int,  # Not accessed, but things break without it?
-    max_title_length: int,  # Not accessed, but things break without it?
+    before: int,
+    max_title_length: int,
     index: int,
     is_last: bool,
     extra_data: ExtraData,
 ) -> int:
+    global timer_id
     global right_status_length
-    add_timer(_redraw_tab_bar, REFRESH_TIME, True)
-    app = ICON_USER + getlogin() + " " + SEPARATOR_SYMBOL_RIGHT
-    host = uname()[1] + ICON_HOST
-    cells = []
-    cells.append((ACTIVE_BG, BAR_BG, SEPARATOR_SYMBOL_RIGHT))
-    cells.append((BG, ACTIVE_BG, app))
-    cells.append((FG, BG, host))
+    if timer_id is None:
+        timer_id = add_timer(_redraw_tab_bar, REFRESH_TIME, True)
+    clock = datetime.now().strftime(" %H:%M")
+    date = datetime.now().strftime(" %d.%m.%Y")
+    cells = get_battery_cells()
+    cells.append((clock_color, clock))
+    cells.append((date_color, date))
     right_status_length = RIGHT_MARGIN
     for cell in cells:
         right_status_length += len(str(cell[1]))
 
     _draw_icon(screen, index)
-    _draw_cwd(screen, index)
     _draw_left_status(
         draw_data,
         screen,
         tab,
+        before,
+        max_title_length,
         index,
+        is_last,
         extra_data,
     )
     _draw_right_status(
